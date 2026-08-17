@@ -1,0 +1,25 @@
+# Single-container alternative to the systemd deployment.
+#
+#   REGISTRYD_API_TOKENS=$(openssl rand -hex 32) docker compose up -d
+#
+# Host networking keeps iroh's UDP hole-punching simple (no double NAT);
+# the write API then listens on the host's 127.0.0.1:8080 directly.
+services:
+  registryd:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    # Graceful stop matters: give the blob store time to close cleanly.
+    stop_grace_period: 300s
+    stop_signal: SIGTERM
+    environment:
+      REGISTRYD_BIND_ADDR: 127.0.0.1:8080
+      REGISTRYD_DATA_DIR: /var/lib/registryd
+      REGISTRYD_API_TOKENS: ${REGISTRYD_API_TOKENS:?set REGISTRYD_API_TOKENS}
+    volumes:
+      - registryd-data:/var/lib/registryd
+
+volumes:
+  registryd-data:

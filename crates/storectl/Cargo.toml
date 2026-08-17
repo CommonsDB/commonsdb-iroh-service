@@ -1,0 +1,38 @@
+[package]
+name = "storectl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "storectl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "storectl"
+path = "src/main.rs"
+
+# Deliberately self-contained: storectl depends only on registry-core
+# (pure, no network logic) plus the public iroh crates via registry-node's
+# read-path plumbing — see docs/reader-guide.md.
+[dependencies]
+registry-core = { workspace = true }
+registry-node = { workspace = true }
+
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dirs = { workspace = true }
+toml = { workspace = true }
+iroh = { workspace = true }
+iroh-docs = { workspace = true }
+n0-future = "0.3"
+
+[dev-dependencies]
+bytes = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }

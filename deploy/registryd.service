@@ -1,0 +1,37 @@
+[Unit]
+Description=registryd — single-node content registry (write API + iroh node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=registryd
+Group=registryd
+ExecStart=/usr/local/bin/registryd run
+Environment=REGISTRYD_CONFIG=/etc/registryd/config.toml
+Restart=always
+RestartSec=5
+
+# Graceful stop is load-bearing: registryd drains its publisher and closes
+# the blob store on SIGTERM. Killing it hard leaves the store "unclean",
+# and the next start pays a full consistency scan (hours on a large
+# store). 300 s is generous — a normal stop takes a few seconds.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+# /var/lib/registryd is created and owned automatically.
+StateDirectory=registryd
+ConfigurationDirectory=registryd
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/registryd
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>registry-viewer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2330; --muted: #68738a;
+    --line: #e3e7ee; --accent: #2456d8; --accent-ink: #ffffff; --ok: #1a7f4b;
+    --warn: #b07d10; --bad: #c0392b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c; --panel: #1a1f29; --ink: #e6eaf2; --muted: #93a0b8;
+      --line: #2a3140; --accent: #6f9bff; --accent-ink: #0d1117; --ok: #4ecb8d;
+      --warn: #e0b34c; --bad: #ef6f5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 24px 20px 60px; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+          padding: 3px 12px; font-size: 12.5px; color: var(--muted); }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip code { font-family: var(--mono); font-size: 11.5px; }
+
+  details.panel { background: var(--panel); border: 1px solid var(--line);
+                  border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; }
+  details.panel > summary { cursor: pointer; display: flex; flex-wrap: wrap;
+    align-items: baseline; gap: 6px 14px; list-style: none; user-select: none; }
+  details.panel > summary::-webkit-details-marker { display: none; }
+  details.panel > summary::before { content: '▸'; color: var(--muted);
+    font-size: 12px; align-self: center; transition: transform .15s ease; }
+  details.panel[open] > summary::before { transform: rotate(90deg); }
+  details.panel[open] > summary { margin-bottom: 12px; }
+  details.panel > summary h2 { margin: 0; font-size: 15px; }
+
+  .row { display: flex; gap: 10px; }
+  input[type=text] { flex: 1; min-width: 0; background: var(--bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
+    font-family: var(--mono); font-size: 13px; }
+  button { background: var(--accent); color: var(--accent-ink); border: 0;
+    border-radius: 8px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+
+  /* live sync banner */
+  .big { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .state { font-size: 13px; }
+  .state.ok { color: var(--ok); }
+  .state.busy { color: var(--warn); }
+  .bar { height: 6px; border-radius: 3px; background: var(--line);
+         overflow: hidden; margin-top: 4px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent);
+           border-radius: 3px; transition: width .6s ease; }
+  .bar.done i { background: var(--ok); }
+
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+          gap: 6px; margin-top: 10px; }
+  .cell { border: 1px solid var(--line); border-radius: 6px; text-align: center;
+          padding: 5px 2px; font-size: 11px; color: var(--muted); background: var(--bg); }
+  .cell b { display: block; font-size: 13px; color: var(--ink); font-weight: 600; }
+  .cell.has { border-color: var(--accent); cursor: pointer; }
+  .cell.has b { color: var(--accent); }
+  .cell.behind { border-color: var(--warn); }
+  .cell.behind b { color: var(--warn); }
+  .cell.stale { border-color: var(--bad); }
+  .cell.pend b { color: var(--muted); }
+
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.key { font-family: var(--mono); font-size: 12px; cursor: pointer; color: var(--accent);
+           word-break: break-all; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+        padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px;
+        margin: 10px 0 0; }
+  .meta { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px;
+          font-size: 13px; margin-top: 10px; }
+  .meta dt { color: var(--muted); } .meta dd { margin: 0; font-family: var(--mono);
+          font-size: 12px; word-break: break-all; }
+  .pager { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+  .hidden { display: none; }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 16px 12px 40px; }
+    #grid { grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 4px; }
+    .cell { font-size: 10px; padding: 4px 1px; }
+    .cell b { font-size: 11px; }
+    .big { font-size: 21px; }
+    th, td { padding: 6px 6px; }
+    .meta { grid-template-columns: 96px 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>registry-viewer <small>what a reader node sees</small></h1>
+  <div class="chips" id="chips"><span class="chip">connecting…</span></div>
+
+  <details class="panel" id="panel-sync" open>
+    <summary>
+      <span class="big" id="records">—</span>
+      <span class="muted">records replicated locally</span>
+      <span class="state" id="sync-state"></span>
+    </summary>
+    <div class="bar" id="bar"><i></i></div>
+    <div class="muted" id="sync-detail" style="margin-top:8px"></div>
+    <div class="muted" id="data-updated" style="margin-top:4px"></div>
+  </details>
+
+  <details class="panel" id="panel-ticket">
+    <summary><h2>Connection ticket</h2>
+      <span class="muted">hand this (or the origin's /ticket URL) to any new machine</span>
+    </summary>
+    <pre id="ticket-text" style="word-break: break-all; white-space: pre-wrap;">…</pre>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="ticket-copy">Copy ticket</button>
+    </div>
+  </details>
+
+  <details class="panel" id="panel-lookup" open>
+    <summary><h2>Look up a record</h2></summary>
+    <div class="row">
+      <input type="text" id="lookup-key" placeholder="CIDv1 or declaration id" spellcheck="false">
+      <button id="lookup-btn">Resolve</button>
+    </div>
+    <div id="record" class="hidden">
+      <dl class="meta" id="record-meta"></dl>
+      <pre id="record-value"></pre>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="external-btn">Resolve from CommonsDB API</button>
+      </div>
+      <div class="muted hidden" id="external-title" style="margin-top:10px"></div>
+      <pre id="external-value" class="hidden"></pre>
+      <div id="external-error" class="error"></div>
+    </div>
+    <div id="record-error" class="error"></div>
+  </details>
+
+  <details class="panel" id="panel-similar" open>
+    <summary><h2>Similarity search</h2>
+      <span class="muted">exact Hamming NNS over ISCC Content-Codes, fully local</span>
+    </summary>
+    <div class="row">
+      <input type="text" id="similar-iscc" placeholder="ISCC:… (full code or Content-Code unit)" spellcheck="false">
+      <select id="similar-radius" style="background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:0 8px">
+        <option value="0">exact</option>
+        <option value="4">≤ 4 bits</option>
+        <option value="8" selected>≤ 8 bits</option>
+        <option value="12">≤ 12 bits</option>
+        <option value="16">≤ 16 bits</option>
+      </select>
+      <button id="similar-btn">Search</button>
+    </div>
+    <div class="muted" id="similar-status" style="margin-top:8px"></div>
+    <div class="tablewrap">
+      <table id="similar-table" class="hidden">
+        <thead><tr><th>distance</th><th>key</th><th>content code</th><th>partition</th></tr></thead>
+        <tbody id="similar-body"></tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="panel" id="panel-partitions" open>
+    <summary><h2>Partitions</h2>
+      <span class="muted" id="scan-status">Synchronizing…</span>
+    </summary>
+    <div class="row" style="align-items:center">
+      <button id="scan-btn" class="ghost">Refresh</button>
+      <button id="sync-all-btn" class="ghost">Sync all</button>
+      <span class="muted" id="mode-hint"></span>
+    </div>
+    <div id="grid"></div>
+  </details>
+
+  <details class="panel hidden" id="listing-panel" open>
+    <summary><h2 id="listing-title"></h2></summary>
+    <div class="pager">
+      <button class="ghost" id="prev-btn">‹ prev</button>
+      <span class="muted" id="page-info"></span>
+      <button class="ghost" id="next-btn">next ›</button>
+      <button class="ghost" id="resync-btn" title="re-walk this partition's index from the network, bypassing caches">Force re-sync</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>key</th><th>size</th><th>added</th><th>content code</th></tr></thead>
+        <tbody id="listing-body"></tbody>
+      </table>
+    </div>
+  </details>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const PAGE = 100;
+let partitions = 256;
+let listing = { id: null, total: 0, offset: 0 };
+
+const esc = (s) => String(s).replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = (n) => Number(n).toLocaleString('en-US');
+
+// Collapsed/expanded state survives reloads, per panel.
+for (const d of document.querySelectorAll('details.panel')) {
+  const saved = localStorage.getItem(`collapse:${d.id}`);
+  if (saved === '0') d.open = false;
+  if (saved === '1') d.open = true;
+  d.addEventListener('toggle', () =>
+    localStorage.setItem(`collapse:${d.id}`, d.open ? '1' : '0'));
+}
+
+async function api(path) {
+  const res = await fetch(path);
+  const body = await res.json();
+  if (!res.ok && body && body.error) throw new Error(body.error);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return body;
+}
+
+let syncMode = 'auto';
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    partitions = s.partitions;
+    syncMode = s.sync_mode ?? 'auto';
+    const up = Math.max(0, (Date.now() - Date.parse(s.started_at)) / 1000);
+    const uptime = up >= 5400 ? `${(up / 3600).toFixed(1)} h`
+      : up >= 90 ? `${Math.round(up / 60)} min` : `${Math.round(up)} s`;
+    $('chips').innerHTML = `
+      <span class="chip">node <b><code>${esc(s.endpoint_id.slice(0, 10))}…</code></b></span>
+      <span class="chip">ticket via <b>${esc(s.ticket_source)}</b></span>
+      <span class="chip"><b>${s.providers}</b> bootstrap provider(s)</span>
+      <span class="chip"><b>${s.partitions}</b> partitions</span>
+      <span class="chip"><b>${s.roots_synced}</b> roots synced</span>
+      <span class="chip">sync <b>${esc(syncMode)}</b></span>
+      <span class="chip">up <b>${uptime}</b></span>` +
+      (s.warm_values ? `<span class="chip"><b>full replica</b> (values warmed)</span>` : '');
+    $('ticket-text').textContent = s.read_ticket ?? '(unavailable)';
+    $('sync-all-btn').textContent =
+      syncMode === 'manual' ? 'Sync all now' : 'Force full re-sync';
+    $('mode-hint').textContent = syncMode === 'manual'
+      ? 'manual mode: only the pointer document syncs automatically — click a partition or "Sync all now" to fetch its records'
+      : '';
+  } catch (e) {
+    $('chips').innerHTML = `<span class="chip error">status failed: ${esc(e.message)}</span>`;
+  }
+}
+$('ticket-copy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($('ticket-text').textContent);
+    $('ticket-copy').textContent = 'Copied ✓';
+  } catch {
+    $('ticket-copy').textContent = 'Copy failed — select the text manually';
+  }
+  setTimeout(() => { $('ticket-copy').textContent = 'Copy ticket'; }, 2500);
+};
+
+const queued = new Set();
+async function requestSync(id) {
+  try {
+    await fetch(`/api/sync/${id}`, { method: 'POST' });
+    queued.add(id);
+    const b = $(`cell-${id}`)?.querySelector('b');
+    if (b) b.textContent = '⟳';
+  } catch {}
+}
+
+function cellFor(id) {
+  let c = $(`cell-${id}`);
+  if (!c) {
+    c = document.createElement('div');
+    c.id = `cell-${id}`;
+    c.className = 'cell';
+    c.innerHTML = `<b>·</b>${String(id).padStart(3, '0')}`;
+    c.addEventListener('click', () => {
+      if (c.classList.contains('has')) openListing(id, 0);
+      // A known-but-unsynced partition: clicking it requests its sync —
+      // in manual mode this is how data arrives at all.
+      else if (c.classList.contains('pend') || c.classList.contains('behind')) requestSync(id);
+    });
+    $('grid').appendChild(c);
+  }
+  return c;
+}
+
+// Rate estimate over the last few overview samples.
+const samples = [];
+function rate(total) {
+  const now = Date.now();
+  samples.push({ now, total });
+  while (samples.length > 20) samples.shift();
+  const old = samples.find((s) => now - s.now <= 60000) ?? samples[0];
+  const dt = (now - old.now) / 1000;
+  if (dt < 3 || total <= old.total) return 0;
+  return (total - old.total) / dt;
+}
+
+// The server's background sync loop keeps every partition warm; this
+// renders its state — instant, no network walks from the UI. Polls fast
+// while the replica is catching up, slowly once it is in sync.
+let pollTimer = null;
+async function refreshOverview() {
+  clearTimeout(pollTimer);
+  let busy = false;
+  try {
+    const o = await api('/api/partitions');
+    const pending = new Set(o.pending ?? []);
+    for (let i = 0; i < partitions; i++) {
+      const cell = cellFor(i);
+      const d = o.detail[i];
+      if (!d) {
+        cell.className = 'cell' + (pending.has(i) ? ' pend' : '');
+        cell.querySelector('b').textContent =
+          queued.has(i) ? '⟳' : (pending.has(i) ? '…' : '·');
+        cell.title = pending.has(i)
+          ? (syncMode === 'manual'
+            ? 'published at the origin — click to sync now'
+            : 'published at the origin — sync queued')
+          : 'no records published';
+        continue;
+      }
+      queued.delete(i);
+      cell.className = 'cell'
+        + (d.records > 0 ? ' has' : '')
+        + (d.behind ? ' behind' : '')
+        + (d.stale_error ? ' stale' : '');
+      cell.querySelector('b').textContent =
+        d.records >= 10000 ? `${Math.round(d.records / 1000)}k` : d.records;
+      cell.title = `partition ${i} — ${num(d.records)} records\n`
+        + (d.latest_added_at
+          ? `newest record inserted ${d.latest_added_at.replace('T', ' ').slice(0, 19)} UTC\n` : '')
+        + `replicated here ${d.synced_at.replace('T', ' ').slice(0, 19)} UTC`
+        + (d.behind ? (syncMode === 'manual'
+            ? '\norigin has newer data — click to sync now'
+            : '\norigin has newer data — sync queued') : '')
+        + (d.stale_error ? `\nrefresh failing: ${d.stale_error}` : '');
+    }
+
+    const total = o.total_records;
+    const perSec = rate(total);
+    busy = o.behind > 0 || o.syncing > 0 || pending.size > 0;
+    $('records').textContent = num(total);
+    const stateEl = $('sync-state');
+    if (busy) {
+      stateEl.className = 'state busy';
+      stateEl.textContent = `syncing — ${o.syncing} partition(s) in flight, `
+        + `${o.behind + pending.size} queued`
+        + (perSec > 1 ? `, ${num(Math.round(perSec))} records/s` : '');
+    } else if (o.roots_known > 0) {
+      stateEl.className = 'state ok';
+      stateEl.textContent = 'in sync with the origin';
+    } else {
+      stateEl.className = 'state busy';
+      stateEl.textContent = 'waiting for the pointer document to sync in…';
+    }
+    const known = Math.max(o.roots_known, 1);
+    const done = Math.max(0, o.synced - o.behind);
+    $('bar').className = 'bar' + (busy || o.roots_known === 0 ? '' : ' done');
+    $('bar').firstElementChild.style.width =
+      `${Math.min(100, Math.round((done / known) * 100))}%`;
+    $('sync-detail').textContent =
+      `${o.synced}/${o.roots_known || '?'} published partitions replicated`
+      + (o.last_pass_at
+        ? ` — last sync pass ${o.last_pass_at.replace('T', ' ').slice(0, 19)} UTC`
+          + ` (${(o.last_pass_secs ?? 0).toFixed(1)}s)` : '');
+    $('data-updated').textContent = o.data_updated_at
+      ? `newest record was inserted into the registry ${o.data_updated_at.replace('T', ' ').slice(0, 19)} UTC`
+        + (o.behind > 0 || (o.pending ?? []).length > 0
+          ? ' (origin may hold newer — replica is behind)' : '')
+      : '';
+    $('scan-status').textContent =
+      `${o.synced}/${o.partitions} partitions synced — ${num(total)} records`;
+  } catch (e) {
+    $('scan-status').textContent = `overview failed: ${e.message}`;
+    busy = true; // keep polling fast until the server answers again
+  }
+  pollTimer = setTimeout(refreshOverview, busy ? 2000 : 10000);
+}
+
+async function openListing(id, offset) {
+  try {
+    const p = await api(`/api/partition/${id}?offset=${offset}&limit=${PAGE}`);
+    listing = { id, total: p.total, offset };
+    const panel = $('listing-panel');
+    panel.classList.remove('hidden');
+    panel.open = true;
+    const newest = p.entries.length
+      ? [...p.entries].map((e) => e.added_at).sort().at(-1) : null;
+    $('listing-title').textContent =
+      `Partition ${String(id).padStart(3, '0')} — ${num(p.total)} records (root ${p.root ? p.root.slice(0, 12) + '…' : 'none'})`
+      + (newest ? ` · newest on page inserted ${newest.replace('T', ' ').slice(0, 19)} UTC` : '');
+    $('listing-body').innerHTML = p.entries.map((e) => `
+      <tr>
+        <td class="key" data-key="${esc(e.key)}">${esc(e.key)}</td>
+        <td>${num(e.size)}</td>
+        <td>${esc(e.added_at.replace('T', ' ').slice(0, 19))}</td>
+        <td><code>${esc(e.content_code ?? '—')}</code></td>
+      </tr>`).join('');
+    $('page-info').textContent =
+      `${num(offset + 1)}–${num(Math.min(offset + PAGE, p.total))} of ${num(p.total)}`;
+    $('prev-btn').disabled = offset === 0;
+    $('next-btn').disabled = offset + PAGE >= p.total;
+    panel.scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    $('scan-status').textContent = `partition ${id}: ${e.message}`;
+  }
+}
+$('listing-body').addEventListener('click', (ev) => {
+  const key = ev.target.closest('td.key')?.dataset.key;
+  if (key) lookup(key);
+});
+
+let currentKey = null;
+async function lookup(key) {
+  key = (key ?? $('lookup-key').value).trim();
+  if (!key) return;
+  $('lookup-key').value = key;
+  $('record').classList.add('hidden');
+  $('record-error').textContent = '';
+  $('external-title').classList.add('hidden');
+  $('external-value').classList.add('hidden');
+  $('external-error').textContent = '';
+  currentKey = key;
+  try {
+    const r = await api(`/api/record/${encodeURIComponent(key)}`);
+    if (!r.found) throw new Error(
+      `Not in the registry (its partition ${r.partition} was checked). ` +
+      `If the import is still running, it may simply not be published yet.`);
+    $('record-meta').innerHTML = `
+      <dt>partition</dt><dd>${r.partition}</dd>
+      <dt>hash</dt><dd>${esc(r.hash)}</dd>
+      <dt>size</dt><dd>${num(r.size)} bytes</dd>
+      <dt>added</dt><dd>${esc(r.added_at)}</dd>
+      <dt>content code</dt><dd>${esc(r.content_code ?? '—')}</dd>`;
+    $('record-value').textContent =
+      r.value === null
+        ? `value unavailable: ${r.value_error ?? 'unknown reason'}`
+        : JSON.stringify(r.value, null, 2);
+    $('record').classList.remove('hidden');
+    $('panel-lookup').open = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    $('record-error').textContent = e.message;
+  }
+}
+
+async function searchSimilar() {
+  const iscc = $('similar-iscc').value.trim();
+  if (!iscc) return;
+  $('similar-status').textContent = 'searching…';
+  $('similar-table').classList.add('hidden');
+  try {
+    const r = await api(`/api/similar?iscc=${encodeURIComponent(iscc)}`
+      + `&max_distance=${$('similar-radius').value}&limit=200`);
+    $('similar-status').textContent =
+      `${r.matches.length} match(es) within ${r.max_distance} bits — scanned `
+      + `${num(r.with_content_code)} codes (query ${r.query_code})`;
+    if (r.matches.length) {
+      $('similar-body').innerHTML = r.matches.map((m) => `
+        <tr>
+          <td>${m.distance}</td>
+          <td class="key" data-key="${esc(m.key)}">${esc(m.key)}</td>
+          <td><code>${esc(m.content_code)}</code></td>
+          <td>${m.partition}</td>
+        </tr>`).join('');
+      $('similar-table').classList.remove('hidden');
+    }
+  } catch (e) {
+    $('similar-status').textContent = `search failed: ${e.message}`;
+  }
+}
+$('similar-btn').onclick = searchSimilar;
+$('similar-iscc').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchSimilar(); });
+$('similar-body').addEventListener('click', (ev) => {
+  const key = ev.target.closest('td.key')?.dataset.key;
+  if (key) lookup(key);
+});
+
+$('external-btn').onclick = async () => {
+  if (!currentKey) return;
+  $('external-btn').disabled = true;
+  $('external-error').textContent = '';
+  $('external-title').textContent = 'resolving from api.commonsdb.org…';
+  $('external-title').classList.remove('hidden');
+  try {
+    const r = await api(`/api/external-metadata/${encodeURIComponent(currentKey)}`);
+    $('external-title').textContent = `central registry metadata (${r.source})`;
+    $('external-value').textContent = JSON.stringify(r.metadata, null, 2);
+    $('external-value').classList.remove('hidden');
+  } catch (e) {
+    $('external-title').classList.add('hidden');
+    $('external-error').textContent = e.message;
+  }
+  $('external-btn').disabled = false;
+};
+
+$('lookup-btn').onclick = () => lookup();
+$('lookup-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') lookup(); });
+$('scan-btn').onclick = refreshOverview;
+$('sync-all-btn').onclick = async () => {
+  try {
+    await fetch('/api/sync', { method: 'POST' });
+    $('mode-hint').textContent = 'full sync requested — watch the grid fill in';
+    setTimeout(refreshOverview, 1000);
+  } catch (e) {
+    $('mode-hint').textContent = `sync request failed: ${e.message}`;
+  }
+};
+$('resync-btn').onclick = async () => {
+  if (listing.id === null) return;
+  await requestSync(listing.id);
+  $('resync-btn').textContent = 'Re-sync queued ⟳';
+  setTimeout(() => { $('resync-btn').textContent = 'Force re-sync'; }, 3000);
+};
+$('prev-btn').onclick = () => openListing(listing.id, Math.max(0, listing.offset - PAGE));
+$('next-btn').onclick = () => openListing(listing.id, listing.offset + PAGE);
+
+loadStatus();
+setInterval(loadStatus, 30000);
+refreshOverview();
+</script>
+</body>
+</html>
