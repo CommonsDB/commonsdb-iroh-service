@@ -99,6 +99,24 @@ What happens on start, in order:
 
 ---
 
+## Self-healing and the optional watchdog
+
+A reader never needs routine restarts. Transfers that stop making
+progress (a peer that is up but not answering) are detected in ~45 s
+and abandoned by closing their connection — the sync loop then retries
+on a fresh one (`run_transfer_with_stall_guard` in
+`crates/registry-node/src/blob_store.rs`). The origin restarting, its
+IP changing, or the network dropping are all recovered automatically;
+the ticket's identity anchor plus the relay make old tickets keep
+working after address changes.
+
+For unattended reader machines, `scripts/viewer-watchdog.sh` adds a
+belt-and-suspenders layer: run it every 5 minutes (launchd
+`StartInterval=300` / cron) and it restarts the viewer only on the two
+wedge signatures (API dead long past startup, or a frozen sync pass
+with work pending). It respects manual stops and startup verification
+scans.
+
 ## If it was killed uncleanly anyway
 
 Crash, power loss, force-kill — data is still safe. The next start runs

@@ -70,6 +70,60 @@ impl IrohBlobStore {
 /// See [`IrohBlobStore::prefetch_limit`].
 const PREFETCH_CONCURRENCY: usize = 2;
 
+/// How long a transfer may go without a single progress event before its
+/// session is declared dead. A live-but-slow transfer keeps emitting
+/// progress and never trips this — only a wedged peer does (observed: an
+/// origin whose engine hung while its connections stayed "healthy" froze
+/// readers' sync loops for hours, since QUIC keepalives never fail for a
+/// peer that is alive but not answering).
+const TRANSFER_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// Drive one batched transfer to termination under a stall guard,
+/// returning whether it completed. The guard NEVER cancels the transfer
+/// future — dropping it mid-write is what corrupt-marks store slots (see
+/// [`IrohBlobStore::prefetch`]). On stall it closes the CONNECTION
+/// instead: the in-flight streams then error out promptly and the
+/// transfer finishes through its ordinary error path; the caller retries
+/// later on a fresh connection.
+async fn run_transfer_with_stall_guard(
+    conn: &iroh::endpoint::Connection,
+    progress: iroh_blobs::api::remote::GetProgress,
+) -> bool {
+    use iroh_blobs::api::remote::GetProgressItem;
+    use n0_future::StreamExt;
+    let mut stream = Box::pin(progress.stream());
+    loop {
+        match tokio::time::timeout(TRANSFER_STALL_TIMEOUT, stream.next()).await {
+            Ok(Some(GetProgressItem::Done(_))) => return true,
+            Ok(Some(GetProgressItem::Error(_))) | Ok(None) => return false,
+            Ok(Some(GetProgressItem::Progress(_))) => {}
+            Err(_) => {
+                conn.close(1u32.into(), b"transfer stalled");
+                // Drain to the future's own end so it is never dropped
+                // mid-poll; the close above makes that prompt. If even
+                // draining stalls, detach it rather than drop it.
+                let drain = async {
+                    while let Some(item) = stream.next().await {
+                        if matches!(
+                            item,
+                            GetProgressItem::Done(_) | GetProgressItem::Error(_)
+                        ) {
+                            break;
+                        }
+                    }
+                };
+                if tokio::time::timeout(std::time::Duration::from_secs(15), drain)
+                    .await
+                    .is_err()
+                {
+                    tokio::spawn(async move { while stream.next().await.is_some() {} });
+                }
+                return false;
+            }
+        }
+    }
+}
+
 fn to_iroh_hash(hash: &CommonHash) -> iroh_blobs::Hash {
     iroh_blobs::Hash::from_bytes(hash.0)
 }
@@ -152,12 +206,11 @@ impl BlobStore for IrohBlobStore {
                 for hash in chunk {
                     request = request.hash(*hash, iroh_blobs::protocol::ChunkRanges::all());
                 }
-                if remote
-                    .execute_get_many(conn.clone(), request.build())
-                    .complete()
-                    .await
-                    .is_err()
-                {
+                let progress = remote.execute_get_many(conn.clone(), request.build());
+                if !run_transfer_with_stall_guard(&conn, progress).await {
+                    // Failed or stalled (connection closed by the guard):
+                    // fall through to the next provider / next pass, which
+                    // dials fresh.
                     fetched_all = false;
                     break;
                 }

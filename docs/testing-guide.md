@@ -9,7 +9,7 @@ failure at that point means.
 Set these once per shell; every command below uses them:
 
 ```bash
-export ORIGIN_HOST=3.66.30.251                       # current deployment
+export ORIGIN_HOST=3.76.25.244                       # current deployment
 export ORIGIN_API=http://$ORIGIN_HOST:8080
 export SSH_KEY=~/.ssh/cdb-registry-demo-key.pem
 export SSH="ssh -i $SSH_KEY ec2-user@$ORIGIN_HOST"
